@@ -143,6 +143,9 @@ private fun HomeScreen(vm: TasbeehViewModel, onStats: () -> Unit, onSettings: ()
             if (s.strict) {
                 val item = LIBRARY[(s.total % LIBRARY.size).toInt()]
                 Spacer(Modifier.height(12.dp))
+                val left = s.strictLeftMs / 1000
+                Text("المتبقي من الجلسة: ${"%d:%02d".format(left / 60, left % 60)}", fontSize = 13.sp, color = cs.secondary)
+                Spacer(Modifier.height(6.dp))
                 Text(item.text, fontSize = 14.sp, textAlign = TextAlign.Center, color = cs.onBackground)
                 Text("${item.source} · ${item.ref} · ${item.grade}", fontSize = 12.sp, color = cs.secondary)
             }
@@ -228,12 +231,17 @@ private fun SettingsScreen(vm: TasbeehViewModel, onBack: () -> Unit) {
             }
         }
         SwitchRow("الوضع الصارم", s.strict) { vm.setStrict(it) }
-        Text("في الوضع الصارم لا تُقبل ضغطة قبل مرور الفاصل الزمني، ويجب أن تضغط بعد إتمام الذكر.",
+        Text("في الوضع الصارم لا تُقبل ضغطة قبل مرور الفاصل الزمني، ويجب أن تضغط بعد إتمام الذكر. تنتهي الجلسة تلقائياً بانتهاء مدتها، والحد الأقصى $MAX_STRICT_MIN دقائق ولا يمكن تجاوزه.",
             fontSize = 13.sp, color = sec)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("الفاصل الزمني: ${s.intervalMs / 1000} ث")
             OutlinedButton({ vm.setInterval(s.intervalMs - 1000) }) { Text("−") }
             OutlinedButton({ vm.setInterval(s.intervalMs + 1000) }) { Text("+") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("مدة الجلسة: ${s.strictMin} د")
+            OutlinedButton({ vm.setStrictMin(s.strictMin - 1) }) { Text("−") }
+            OutlinedButton({ vm.setStrictMin(s.strictMin + 1) }) { Text("+") }
         }
         Text("الخصوصية: كل بياناتك محفوظة على جهازك فقط، بلا حسابات ولا إعلانات ولا تتبع.",
             fontSize = 13.sp, color = sec)

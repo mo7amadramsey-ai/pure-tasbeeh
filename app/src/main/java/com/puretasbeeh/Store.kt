@@ -8,10 +8,14 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 val Context.ds by preferencesDataStore("pure_tasbeeh")
+
+/** الحد الأقصى المطلق لجلسة الوضع الصارم بالدقائق. قرار المستخدم: لا يمكن تجاوزه أبداً. */
+const val MAX_STRICT_MIN = 10
 
 private object K {
     val dhikr = intPreferencesKey("dhikr")
@@ -20,6 +24,8 @@ private object K {
     val vibrate = booleanPreferencesKey("vibrate")
     val theme = intPreferencesKey("theme")
     val strict = booleanPreferencesKey("strict")
+    val strictUntil = longPreferencesKey("strict_until")
+    val strictMin = intPreferencesKey("strict_min")
     val interval = longPreferencesKey("interval")
     val total = longPreferencesKey("total")
     val sessions = intPreferencesKey("sessions")
@@ -31,6 +37,7 @@ data class UiState(
     val dhikr: Int = 0, val count: Int = 0, val goal: Int = 0,
     val vibrate: Boolean = true, val theme: Int = 0, val strict: Boolean = false,
     val intervalMs: Long = 1000, val total: Long = 0, val sessions: Int = 0,
+    val strictUntil: Long = 0, val strictLeftMs: Long = 0, val strictMin: Int = 5,
     val daily: Map<String, Int> = emptyMap(), val per: Map<String, Int> = emptyMap()
 )
 
@@ -42,10 +49,19 @@ private fun parse(s: String?): Map<String, Int> =
 
 private fun enc(m: Map<String, Int>) = m.entries.joinToString(";") { "${it.key}=${it.value}" }
 
-private fun Preferences.toState() = UiState(
+private fun Preferences.toState(): UiState {
+    val now = System.currentTimeMillis()
+    val until = this[K.strictUntil] ?: 0L
+    // سقف صارم عند القراءة: مهما كانت القيمة المخزنة، لا يتجاوز المتبقي الحد الأقصى
+    val left = (until - now).coerceIn(0L, MAX_STRICT_MIN * 60_000L)
+    return toStateBase(until, left, (this[K.strictMin] ?: 5).coerceIn(1, MAX_STRICT_MIN))
+}
+
+private fun Preferences.toStateBase(until: Long, left: Long, minutes: Int) = UiState(
     dhikr = this[K.dhikr] ?: 0, count = this[K.count] ?: 0, goal = this[K.goal] ?: 0,
-    vibrate = this[K.vibrate] ?: true, theme = this[K.theme] ?: 0, strict = this[K.strict] ?: false,
+    vibrate = this[K.vibrate] ?: true, theme = this[K.theme] ?: 0, strict = left > 0L,
     intervalMs = this[K.interval] ?: 1000L, total = this[K.total] ?: 0L, sessions = this[K.sessions] ?: 0,
+    strictUntil = until, strictLeftMs = left, strictMin = minutes,
     daily = parse(this[K.daily]), per = parse(this[K.per])
 )
 
@@ -57,6 +73,22 @@ class TasbeehViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { store.data.collect { state = it.toState() } }
+        // مؤقت الوضع الصارم: يحدّث المتبقي كل ثانية، وينهي الجلسة تلقائياً عند انتهاء الوقت
+        viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                val s = state
+                if (s.strictUntil > 0L) {
+                    val left = (s.strictUntil - System.currentTimeMillis()).coerceIn(0L, MAX_STRICT_MIN * 60_000L)
+                    if (left <= 0L) {
+                        state = s.copy(strict = false, strictLeftMs = 0L, strictUntil = 0L)
+                        store.edit { it[K.strictUntil] = 0L }
+                    } else if (left != s.strictLeftMs) {
+                        state = s.copy(strictLeftMs = left)
+                    }
+                }
+            }
+        }
     }
 
     /** يعيد true إذا احتُسبت الضغطة. */
@@ -101,7 +133,13 @@ class TasbeehViewModel(app: Application) : AndroidViewModel(app) {
     fun resetCount() = put(K.count, 0)
     fun setVibrate(v: Boolean) = put(K.vibrate, v)
     fun setTheme(t: Int) = put(K.theme, t)
-    fun setStrict(v: Boolean) = put(K.strict, v)
+    /** تشغيل الوضع الصارم يبدأ جلسة محدودة المدة (1 إلى 10 دقائق)، وإيقافه ينهيها فوراً. */
+    fun setStrict(v: Boolean) {
+        val minutes = state.strictMin.coerceIn(1, MAX_STRICT_MIN)
+        val until = if (v) System.currentTimeMillis() + minutes * 60_000L else 0L
+        viewModelScope.launch { store.edit { it[K.strictUntil] = until } }
+    }
+    fun setStrictMin(m: Int) = put(K.strictMin, m.coerceIn(1, MAX_STRICT_MIN))
     fun setInterval(ms: Long) = put(K.interval, ms.coerceIn(1000L, 10000L))
     fun clearStats() {
         viewModelScope.launch {
