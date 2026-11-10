@@ -34,12 +34,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-private val LightC = lightColorScheme(
+internal val LightC = lightColorScheme(
     primary = Color(0xFF718873), onPrimary = Color(0xFFF3F0E8),
     background = Color(0xFFF3F0E8), onBackground = Color(0xFF35483A),
     surface = Color(0xFFDCE4D8), onSurface = Color(0xFF35483A), secondary = Color(0xFFB8B5AA)
 )
-private val DarkC = darkColorScheme(
+internal val DarkC = darkColorScheme(
     primary = Color(0xFF8FA591), onPrimary = Color(0xFF252925),
     background = Color(0xFF252925), onBackground = Color(0xFFF3F0E8),
     surface = Color(0xFF323832), onSurface = Color(0xFFF3F0E8), secondary = Color(0xFFB8B5AA)
@@ -63,6 +63,8 @@ fun AppRoot(vm: TasbeehViewModel) {
     val ctx = LocalContext.current
     // كلما تغيّر الوضع الصارم (تشغيل/انتهاء الجلسة) نطبّق أو نرفع حماية التركيز
     LaunchedEffect(s.strict) { ctx.findActivity()?.applyFocus(s.strict) }
+    // إن كانت المقاطعة التلقائية مفعّلة نتأكد أن الخدمة تعمل (لا نوقفها هنا لأن الحالة تبدأ فارغة قبل التحميل)
+    LaunchedEffect(s.auto) { if (s.auto) vm.startService() }
     BackHandler(enabled = screen != Screen.Home) { screen = Screen.Home }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         MaterialTheme(colorScheme = if (dark) DarkC else LightC) {
@@ -251,7 +253,7 @@ private fun SettingsScreen(vm: TasbeehViewModel, onBack: () -> Unit) {
         }
         val sctx = LocalContext.current
         val dndOk = sctx.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted
-        Text("أثناء الجلسة يُثبَّت التطبيق على الشاشة، فتُمنع الإشعارات والتطبيقات الأخرى. للخروج في أي وقت اضغط مطولاً على زرَّي الرجوع والمهام معاً. قد يطلب النظام تأكيد التثبيت أول مرة.",
+        Text("أثناء جلسة الوضع الصارم تبقى الشاشة مضاءة ويُفعَّل عدم الإزعاج.",
             fontSize = 13.sp, color = sec)
         if (dndOk) {
             Text("عدم الإزعاج: الإذن ممنوح، وسيُفعَّل أثناء الجلسة.", fontSize = 13.sp, color = sec)
@@ -264,6 +266,27 @@ private fun SettingsScreen(vm: TasbeehViewModel, onBack: () -> Unit) {
             Text("مدة الجلسة: ${s.strictMin} د")
             OutlinedButton({ vm.setStrictMin(s.strictMin - 1) }) { Text("−") }
             OutlinedButton({ vm.setStrictMin(s.strictMin + 1) }) { Text("+") }
+        }
+        Text("المقاطعة التلقائية", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        SwitchRow("قاطعني لأسبّح", s.auto) { vm.setAuto(it) }
+        Text("يظهر التطبيق فوق ما تفعله (لعبة أو عمل) ويطلب منك إتمام الذكر، ثم تكمل. لا تتجاوز المقاطعة $MAX_STRICT_MIN دقائق أبداً، ولا تُقاطع المكالمات.",
+            fontSize = 13.sp, color = sec)
+        if (!Settings.canDrawOverlays(sctx)) {
+            OutlinedButton({
+                sctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:" + sctx.packageName)))
+            }) { Text("السماح بالظهور فوق التطبيقات (مطلوب)") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("كل ${s.everyMin} دقيقة")
+            OutlinedButton({ vm.setEvery(s.everyMin - 5) }) { Text("−") }
+            OutlinedButton({ vm.setEvery(s.everyMin + 5) }) { Text("+") }
+        }
+        Text("عدد التسبيحات في كل مقاطعة")
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(11, 33, 50, 100).forEach { c ->
+                FilterChip(selected = s.taskCount == c, onClick = { vm.setTaskCount(c) }, label = { Text("$c") })
+            }
         }
         Text("الخصوصية: كل بياناتك محفوظة على جهازك فقط، بلا حسابات ولا إعلانات ولا تتبع.",
             fontSize = 13.sp, color = sec)

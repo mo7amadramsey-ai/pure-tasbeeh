@@ -19,11 +19,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * يطبّق أو يرفع حماية جلسة التركيز:
+     * يطبّق أو يرفع حماية جلسة التركيز اليدوية (بلا تثبيت للشاشة بطلب المستخدم):
      * 1) إبقاء الشاشة مضاءة،
-     * 2) تثبيت الشاشة (Screen Pinning): يمنع الإشعارات والتنقل لتطبيقات أخرى،
-     *    ويخرج المستخدم منه دائماً بضغطة مطولة على زرَّي الرجوع والمهام،
-     * 3) عدم الإزعاج بوضع «الأولوية» إن مُنح الإذن (المكالمات حسب إعدادات النظام).
+     * 2) عدم الإزعاج بوضع «الأولوية» إن مُنح الإذن (المكالمات حسب إعدادات النظام).
      * لا يعطّل شيئاً من إعدادات الجهاز، ولا يمنع الطوارئ.
      */
     fun applyFocus(on: Boolean) {
@@ -31,7 +29,6 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("focus", MODE_PRIVATE)
         if (on) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            runCatching { startLockTask() } // قد يطلب النظام تأكيداً من المستخدم
             if (nm.isNotificationPolicyAccessGranted) {
                 // نحفظ الوضع السابق في التخزين حتى نستعيده حتى لو أُغلق التطبيق
                 if (!prefs.contains("saved")) {
@@ -41,7 +38,6 @@ class MainActivity : ComponentActivity() {
             }
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            runCatching { stopLockTask() } // يرمي استثناء إن لم نكن مثبّتين، فنتجاهله
             if (prefs.contains("saved")) {
                 val old = prefs.getInt("saved", NotificationManager.INTERRUPTION_FILTER_ALL)
                 if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(old)

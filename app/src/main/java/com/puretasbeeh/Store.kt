@@ -2,6 +2,7 @@ package com.puretasbeeh
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.os.SystemClock
 import androidx.compose.runtime.*
 import androidx.datastore.preferences.core.*
@@ -17,7 +18,7 @@ val Context.ds by preferencesDataStore("pure_tasbeeh")
 /** الحد الأقصى المطلق لجلسة الوضع الصارم بالدقائق. قرار المستخدم: لا يمكن تجاوزه أبداً. */
 const val MAX_STRICT_MIN = 10
 
-private object K {
+internal object K {
     val dhikr = intPreferencesKey("dhikr")
     val count = intPreferencesKey("count")
     val goal = intPreferencesKey("goal")
@@ -26,6 +27,9 @@ private object K {
     val strict = booleanPreferencesKey("strict")
     val strictUntil = longPreferencesKey("strict_until")
     val strictMin = intPreferencesKey("strict_min")
+    val auto = booleanPreferencesKey("auto")
+    val every = intPreferencesKey("every_min")
+    val taskCount = intPreferencesKey("task_count")
     val interval = longPreferencesKey("interval")
     val total = longPreferencesKey("total")
     val sessions = intPreferencesKey("sessions")
@@ -38,6 +42,7 @@ data class UiState(
     val vibrate: Boolean = true, val theme: Int = 0, val strict: Boolean = false,
     val intervalMs: Long = 1000, val total: Long = 0, val sessions: Int = 0,
     val strictUntil: Long = 0, val strictLeftMs: Long = 0, val strictMin: Int = 5,
+    val auto: Boolean = false, val everyMin: Int = 30, val taskCount: Int = 33,
     val daily: Map<String, Int> = emptyMap(), val per: Map<String, Int> = emptyMap()
 )
 
@@ -62,6 +67,8 @@ private fun Preferences.toStateBase(until: Long, left: Long, minutes: Int) = UiS
     vibrate = this[K.vibrate] ?: true, theme = this[K.theme] ?: 0, strict = left > 0L,
     intervalMs = this[K.interval] ?: 1000L, total = this[K.total] ?: 0L, sessions = this[K.sessions] ?: 0,
     strictUntil = until, strictLeftMs = left, strictMin = minutes,
+    auto = this[K.auto] ?: false, everyMin = (this[K.every] ?: 30).coerceIn(5, 240),
+    taskCount = (this[K.taskCount] ?: 33).coerceIn(11, 100),
     daily = parse(this[K.daily]), per = parse(this[K.per])
 )
 
@@ -140,6 +147,39 @@ class TasbeehViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { store.edit { it[K.strictUntil] = until } }
     }
     fun setStrictMin(m: Int) = put(K.strictMin, m.coerceIn(1, MAX_STRICT_MIN))
+
+    /** تشغيل/إيقاف المقاطعة التلقائية: تبدأ خدمة تعمل في الخلفية وتظهر نافذة التسبيح كل فترة. */
+    fun setAuto(v: Boolean) {
+        put(K.auto, v)
+        if (v) startService() else getApplication<Application>().stopService(Intent(getApplication<Application>(), InterruptService::class.java))
+    }
+    fun startService() {
+        val app = getApplication<Application>()
+        app.startForegroundService(Intent(app, InterruptService::class.java))
+    }
+    fun setEvery(m: Int) = put(K.every, m.coerceIn(5, 240))
+    fun setTaskCount(n: Int) = put(K.taskCount, n.coerceIn(11, 100))
+
+    /** يحتسب تسبيحة في الإحصائيات دون تغيير العداد الرئيسي (تُستخدم في نافذة المقاطعة). */
+    fun record() {
+        val today = LocalDate.now().toString()
+        val dk = state.dhikr.toString()
+        viewModelScope.launch {
+            store.edit { p ->
+                p[K.total] = (p[K.total] ?: 0L) + 1
+                val d = parse(p[K.daily]).toMutableMap()
+                d[today] = (d[today] ?: 0) + 1
+                p[K.daily] = enc(d.entries.sortedBy { it.key }.takeLast(60).associate { it.key to it.value })
+                val per = parse(p[K.per]).toMutableMap()
+                per[dk] = (per[dk] ?: 0) + 1
+                p[K.per] = enc(per)
+            }
+        }
+    }
+    /** يحتسب جلسة ذكر مكتملة عند إنجاز مهمة المقاطعة. */
+    fun completeSession() {
+        viewModelScope.launch { store.edit { it[K.sessions] = (it[K.sessions] ?: 0) + 1 } }
+    }
     fun setInterval(ms: Long) = put(K.interval, ms.coerceIn(1000L, 10000L))
     fun clearStats() {
         viewModelScope.launch {
