@@ -1,5 +1,10 @@
 package com.puretasbeeh
 
+import android.app.NotificationManager
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -17,6 +22,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
@@ -43,11 +49,20 @@ private enum class Screen { Home, Stats, Settings }
 
 private val GOALS = listOf(0 to "مفتوح", 33 to "33", 100 to "100", 500 to "500", 1000 to "1000")
 
+private fun Context.findActivity(): MainActivity? {
+    var c: Context? = this
+    while (c is ContextWrapper) { if (c is MainActivity) return c; c = c.baseContext }
+    return null
+}
+
 @Composable
 fun AppRoot(vm: TasbeehViewModel) {
     val s = vm.state
     val dark = when (s.theme) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
     var screen by remember { mutableStateOf(Screen.Home) }
+    val ctx = LocalContext.current
+    // كلما تغيّر الوضع الصارم (تشغيل/انتهاء الجلسة) نطبّق أو نرفع حماية التركيز
+    LaunchedEffect(s.strict) { ctx.findActivity()?.applyFocus(s.strict) }
     BackHandler(enabled = screen != Screen.Home) { screen = Screen.Home }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         MaterialTheme(colorScheme = if (dark) DarkC else LightC) {
@@ -141,13 +156,9 @@ private fun HomeScreen(vm: TasbeehViewModel, onStats: () -> Unit, onSettings: ()
                 }
             }
             if (s.strict) {
-                val item = LIBRARY[(s.total % LIBRARY.size).toInt()]
                 Spacer(Modifier.height(12.dp))
                 val left = s.strictLeftMs / 1000
                 Text("المتبقي من الجلسة: ${"%d:%02d".format(left / 60, left % 60)}", fontSize = 13.sp, color = cs.secondary)
-                Spacer(Modifier.height(6.dp))
-                Text(item.text, fontSize = 14.sp, textAlign = TextAlign.Center, color = cs.onBackground)
-                Text("${item.source} · ${item.ref} · ${item.grade}", fontSize = 12.sp, color = cs.secondary)
             }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { confirmReset = true }) { Text("إعادة ضبط العداد", color = cs.secondary) }
@@ -237,6 +248,17 @@ private fun SettingsScreen(vm: TasbeehViewModel, onBack: () -> Unit) {
             Text("الفاصل الزمني: ${s.intervalMs / 1000} ث")
             OutlinedButton({ vm.setInterval(s.intervalMs - 1000) }) { Text("−") }
             OutlinedButton({ vm.setInterval(s.intervalMs + 1000) }) { Text("+") }
+        }
+        val sctx = LocalContext.current
+        val dndOk = sctx.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted
+        Text("أثناء الجلسة يُثبَّت التطبيق على الشاشة، فتُمنع الإشعارات والتطبيقات الأخرى. للخروج في أي وقت اضغط مطولاً على زرَّي الرجوع والمهام معاً. قد يطلب النظام تأكيد التثبيت أول مرة.",
+            fontSize = 13.sp, color = sec)
+        if (dndOk) {
+            Text("عدم الإزعاج: الإذن ممنوح، وسيُفعَّل أثناء الجلسة.", fontSize = 13.sp, color = sec)
+        } else {
+            OutlinedButton({ sctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }) {
+                Text("السماح بعدم الإزعاج أثناء الجلسة")
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("مدة الجلسة: ${s.strictMin} د")
