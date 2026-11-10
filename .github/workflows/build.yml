@@ -2,6 +2,9 @@ name: Build APK
 on:
   push:
   workflow_dispatch:
+# صلاحية الكتابة مطلوبة لنشر الإصدار (Release) برابط تحميل مباشر
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,3 +19,14 @@ jobs:
         with:
           name: pure-tasbeeh-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+      # نشر آخر APK على صفحة Releases برابط مباشر ثابت (يعمل من الهاتف بلا تسجيل دخول)
+      - name: Publish latest APK
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/*.apk pure-tasbeeh.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest pure-tasbeeh.apk --prerelease \
+            --title "Pure Tasbeeh - آخر نسخة تجريبية" \
+            --notes "نسخة debug تُبنى تلقائياً مع كل تحديث. commit: ${GITHUB_SHA::7}"
